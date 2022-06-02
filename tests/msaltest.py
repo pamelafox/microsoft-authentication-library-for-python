@@ -41,8 +41,11 @@ def _input_scopes():
         accept_nonempty_string=True,
         ).split()
 
-def _select_account(app):
+def _select_account(app, show_confidential_app_placeholder=False):
     accounts = app.get_accounts()
+    if show_confidential_app_placeholder and isinstance(
+            app, msal.ConfidentialClientApplication):
+        accounts.insert(0, {"username": "This Client"})
     if accounts:
         return _select_options(
             accounts,
@@ -54,11 +57,11 @@ def _select_account(app):
 
 def acquire_token_silent(app):
     """acquire_token_silent() - with an account already signed into MSAL Python."""
-    account = _select_account(app)
+    account = _select_account(app, show_confidential_app_placeholder=True)
     if account:
         pprint.pprint(app.acquire_token_silent(
             _input_scopes(),
-            account=account,
+            account=account if "home_account_id" in account else None,
             force_refresh=_input_boolean("Bypass MSAL Python's token cache?"),
             ))
 
@@ -127,6 +130,10 @@ def remove_account(app):
         app.remove_account(account)
         print('Account "{}" and/or its token(s) are signed out from MSAL Python'.format(account["username"]))
 
+def acquire_token_for_client(app):
+    """acquire_token_for_client() - Only for confidential client"""
+    pprint.pprint(app.acquire_token_for_client(_input_scopes()))
+
 def exit(_):
     """Exit"""
     bug_link = "https://github.com/AzureAD/microsoft-authentication-library-for-python/issues/new/choose"
@@ -139,13 +146,12 @@ def main():
         {"client_id": "04b07795-8ddb-461a-bbee-02f9e1bf7b46", "name": "Azure CLI (Correctly configured for MSA-PT)"},
         {"client_id": "04f0c124-f2bc-4f59-8241-bf6df9866bbd", "name": "Visual Studio (Correctly configured for MSA-PT)"},
         {"client_id": "95de633a-083e-42f5-b444-a4295d8e9314", "name": "Whiteboard Services (Non MSA-PT app. Accepts AAD & MSA accounts.)"},
+        {"client_id": None, "client_secret": None, "name": "System-assigned Managed Identity (Only works when running inside a supported environment, such as Azure VM)"},
         ],
         option_renderer=lambda a: a["name"],
         header="Impersonate this app (or you can type in the client_id of your own app)",
         accept_nonempty_string=True)
-    app = msal.PublicClientApplication(
-        chosen_app["client_id"] if isinstance(chosen_app, dict) else chosen_app,
-        authority=_select_options([
+    authority = _select_options([
             "https://login.microsoftonline.com/common",
             "https://login.microsoftonline.com/organizations",
             "https://login.microsoftonline.com/microsoft.onmicrosoft.com",
@@ -154,20 +160,32 @@ def main():
             ],
             header="Input authority (Note that MSA-PT apps would NOT use the /common authority)",
             accept_nonempty_string=True,
-            ),
         )
+    if isinstance(chosen_app, dict) and "client_secret" in chosen_app:
+        app = msal.ConfidentialClientApplication(
+            chosen_app["client_id"],
+            client_credential=chosen_app["client_secret"],
+            authority=authority,
+            )
+    else:
+        app = msal.PublicClientApplication(
+            chosen_app["client_id"] if isinstance(chosen_app, dict) else chosen_app,
+            authority=authority,
+            )
     if _input_boolean("Enable MSAL Python's DEBUG log?"):
         logging.basicConfig(level=logging.DEBUG)
     while True:
-        func = _select_options([
+        func = _select_options(list(filter(None, [
             acquire_token_silent,
             acquire_token_interactive,
             acquire_token_by_username_password,
             acquire_ssh_cert_silently,
             acquire_ssh_cert_interactive,
             remove_account,
+            acquire_token_for_client if isinstance(
+                app, msal.ConfidentialClientApplication) else None,
             exit,
-            ], option_renderer=lambda f: f.__doc__, header="MSAL Python APIs:")
+            ])), option_renderer=lambda f: f.__doc__, header="MSAL Python APIs:")
         try:
             func(app)
         except KeyboardInterrupt:  # Useful for bailing out a stuck interactive flow

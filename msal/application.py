@@ -1702,6 +1702,21 @@ class ConfidentialClientApplication(ClientApplication):  # server-side web app
             - an error response would contain "error" and usually "error_description".
         """
         # TBD: force_refresh behavior
+        if self.client_credential is None:
+            from .imds import _scope_to_resource, _obtain_token
+            response = _obtain_token(
+                self.http_client,
+                " ".join(map(_scope_to_resource, scopes)),
+                client_id=self.client_id,  # None for system-assigned, GUID for user-assigned
+                )
+            if "error" not in response:
+                self.token_cache.add(dict(
+                    client_id=self.client_id,
+                    scope=response["scope"].split() if "scope" in response else scopes,
+                    token_endpoint=self.authority.token_endpoint,
+                    response=response.copy(),
+                    ))
+            return response
         if self.authority.tenant.lower() in ["common", "organizations"]:
             warnings.warn(
                 "Using /common or /organizations authority "
