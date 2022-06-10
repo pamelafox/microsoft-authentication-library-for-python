@@ -146,7 +146,7 @@ def main():
         {"client_id": "04b07795-8ddb-461a-bbee-02f9e1bf7b46", "name": "Azure CLI (Correctly configured for MSA-PT)"},
         {"client_id": "04f0c124-f2bc-4f59-8241-bf6df9866bbd", "name": "Visual Studio (Correctly configured for MSA-PT)"},
         {"client_id": "95de633a-083e-42f5-b444-a4295d8e9314", "name": "Whiteboard Services (Non MSA-PT app. Accepts AAD & MSA accounts.)"},
-        {"client_id": None, "client_secret": None, "name": "System-assigned Managed Identity (Only works when running inside a supported environment, such as Azure VM)"},
+        {"client_id": None, "client_secret": None, "name": "System-assigned Managed Identity (Only works when running inside a supported environment, such as Azure VM, Azure App Service, Azure Automation)"},
         ],
         option_renderer=lambda a: a["name"],
         header="Impersonate this app (or you can type in the client_id of your own app)",
