@@ -1,4 +1,12 @@
 import getpass, logging, pprint, sys, msal
+from msal.auth_scheme import PopAuthScheme
+
+
+placeholder_auth_scheme = PopAuthScheme(
+    http_method="GET",
+    url="https://example.com/endpoint",
+    nonce="placeholder",
+    )
 
 
 AZURE_CLI = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
@@ -63,6 +71,7 @@ def acquire_token_silent(app):
             _input_scopes(),
             account=account,
             force_refresh=_input_boolean("Bypass MSAL Python's token cache?"),
+            auth_scheme=placeholder_auth_scheme if app._enable_broker else None,
             ))
 
 def _acquire_token_interactive(app, scopes, data=None):
@@ -87,7 +96,9 @@ def _acquire_token_interactive(app, scopes, data=None):
         enable_msa_passthrough=app.client_id in [  # Apps are expected to set this right
             AZURE_CLI, VISUAL_STUDIO,
             ],  # Here this test app mimics the setting for some known MSA-PT apps
-        prompt=prompt, login_hint=login_hint, data=data or {})
+        prompt=prompt, login_hint=login_hint, data=data or {},
+        auth_scheme=placeholder_auth_scheme if app._enable_broker else None,
+        )
     if login_hint and "id_token_claims" in result:
         signed_in_user = result.get("id_token_claims", {}).get("preferred_username")
         if signed_in_user != login_hint:

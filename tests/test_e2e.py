@@ -27,7 +27,14 @@ import requests
 import msal
 from tests.http_client import MinimalHttpClient, MinimalResponse
 from msal.oauth2cli import AuthCodeReceiver
+from msal.oauth2cli.oidc import decode_part
+from msal.auth_scheme import PopAuthScheme
 
+try:
+    import pymsalruntime
+    broker_available = True
+except ImportError:
+    broker_available = False
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG if "-v" in sys.argv else logging.INFO)
 
@@ -167,11 +174,6 @@ class E2eTestCase(unittest.TestCase):
             http_client=None,
             azure_region=None,
             **kwargs):
-        try:
-            import pymsalruntime
-            broker_available = True
-        except ImportError:
-            broker_available = False
         return (msal.ConfidentialClientApplication
                 if client_credential else msal.PublicClientApplication)(
             client_id,
@@ -188,6 +190,7 @@ class E2eTestCase(unittest.TestCase):
             client_secret=None,  # Since MSAL 1.11, confidential client has ROPC too
             azure_region=None,
             http_client=None,
+            auth_scheme=None,
             **ignored):
         assert authority and client_id and username and password and scope
         self.app = self._build_app(
@@ -197,12 +200,13 @@ class E2eTestCase(unittest.TestCase):
                 # Here we just use it to test a regional app won't break ROPC.
             client_credential=client_secret)
         result = self.app.acquire_token_by_username_password(
-            username, password, scopes=scope)
+            username, password, scopes=scope, auth_scheme=auth_scheme)
         self.assertLoosely(result)
         self.assertCacheWorksForUser(
             result, scope,
             username=username,  # Our implementation works even when "profile" scope was not requested, or when profile claims is unavailable in B2C
             )
+        return result
 
     def _test_device_flow(
             self, client_id=None, authority=None, scope=None, **ignored):
@@ -1035,6 +1039,27 @@ class ArlingtonCloudTestCase(LabBasedTestCase):
         # Note: An alias in this region is no longer accepting HTTPS traffic.
         #       If this test case passes without exception,
         #       it means MSAL Python is not affected by that.
+
+
+class PopTestCase(LabBasedTestCase):
+    @unittest.skipUnless(broker_available, "AT POP feature is supported by using broker")
+    def test_at_pop_should_contain_pop_scheme_content(self):
+        auth_scheme = PopAuthScheme(
+            http_method="GET",
+            url="https://www.Contoso.com/Path1/Path2?queryParam1=a&queryParam2=b",
+            nonce="placeholder",
+            )
+        config = self.get_lab_user(usertype="cloud")
+        config["password"] = self.get_lab_user_secret(config["lab_name"])
+        result = self._test_username_password(auth_scheme=auth_scheme, **config)
+        self.assertEqual(result["token_type"], "pop")
+        payload = json.loads(decode_part(result["access_token"].split(".")[1]))
+        logger.debug("AT POP payload = %s", json.dumps(payload, indent=2))
+        self.assertEqual(payload["m"], auth_scheme._http_method)
+        self.assertEqual(payload["u"], auth_scheme._url.netloc)
+        self.assertEqual(payload["p"], auth_scheme._url.path)
+        self.assertEqual(payload["nonce"], auth_scheme._nonce)
+
 
 if __name__ == "__main__":
     unittest.main()
