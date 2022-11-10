@@ -1041,8 +1041,8 @@ class ArlingtonCloudTestCase(LabBasedTestCase):
         #       it means MSAL Python is not affected by that.
 
 
+@unittest.skipUnless(broker_available, "AT POP feature is only supported by using broker")
 class PopTestCase(LabBasedTestCase):
-    @unittest.skipUnless(broker_available, "AT POP feature is supported by using broker")
     def test_at_pop_should_contain_pop_scheme_content(self):
         auth_scheme = PopAuthScheme(
             http_method="GET",
@@ -1059,6 +1059,34 @@ class PopTestCase(LabBasedTestCase):
         self.assertEqual(payload["u"], auth_scheme._url.netloc)
         self.assertEqual(payload["p"], auth_scheme._url.path)
         self.assertEqual(payload["nonce"], auth_scheme._nonce)
+
+    def test_at_pop_via_testingsts_service(self):
+        """Based on https://testingsts.azurewebsites.net/ServerNonce"""
+        auth_scheme = PopAuthScheme(
+            http_method="POST",
+            url="https://www.Contoso.com/Path1/Path2?queryParam1=a&queryParam2=b",
+            nonce=requests.get(
+                # TODO: Could use ".../missing" and then parse its WWW-Authenticate header
+                "https://testingsts.azurewebsites.net/servernonce/get").text,
+            )
+        config = self.get_lab_user(usertype="cloud")
+        config["password"] = self.get_lab_user_secret(config["lab_name"])
+        result = self._test_username_password(auth_scheme=auth_scheme, **config)
+        self.assertEqual(result["token_type"], "pop")
+        shr = result["access_token"]
+        payload = json.loads(decode_part(result["access_token"].split(".")[1]))
+        logger.debug("AT POP payload = %s", json.dumps(payload, indent=2))
+        self.assertEqual(payload["m"], auth_scheme._http_method)
+        self.assertEqual(payload["u"], auth_scheme._url.netloc)
+        self.assertEqual(payload["p"], auth_scheme._url.path)
+        self.assertEqual(payload["nonce"], auth_scheme._nonce)
+
+        validation = requests.post(
+            # TODO: This endpoint does not seem to validate the url
+            "https://testingsts.azurewebsites.net/servernonce/validateshr",
+            data={"SHR": shr},
+            )
+        self.assertEqual(validation.status_code, 200)
 
 
 if __name__ == "__main__":
