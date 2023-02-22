@@ -1,4 +1,4 @@
-import getpass, logging, pprint, sys, msal
+import getpass, logging, pprint, sys, requests, msal
 
 
 AZURE_CLI = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
@@ -142,11 +142,15 @@ def acquire_token_for_client(app):
     """acquire_token_for_client() - Only for confidential client"""
     pprint.pprint(app.acquire_token_for_client(_input_scopes()))
 
-def exit(_):
+def acquire_token_for_managed_identity(app):
+    """acquire_token() - Only for managed identity"""
+    pprint.pprint(app.acquire_token(_input_scopes()))
+
+def exit(app):
     """Exit"""
     bug_link = (
         "https://identitydivision.visualstudio.com/Engineering/_queries/query/79b3a352-a775-406f-87cd-a487c382a8ed/"
-        if app._enable_broker else
+        if getattr(app, "_enable_broker") else
         "https://github.com/AzureAD/microsoft-authentication-library-for-python/issues/new/choose"
         )
     print("Bye. If you found a bug, please report it here: {}".format(bug_link))
@@ -158,7 +162,8 @@ def main():
         {"client_id": AZURE_CLI, "name": "Azure CLI (Correctly configured for MSA-PT)"},
         {"client_id": VISUAL_STUDIO, "name": "Visual Studio (Correctly configured for MSA-PT)"},
         {"client_id": "95de633a-083e-42f5-b444-a4295d8e9314", "name": "Whiteboard Services (Non MSA-PT app. Accepts AAD & MSA accounts.)"},
-        {"client_id": None, "client_secret": None, "name": "System-assigned Managed Identity (Only works when running inside a supported environment, such as Azure VM, Azure App Service, Azure Automation)"},
+        {"client_id": None, "client_secret": None, "name": "A confidential app, federated by a System-assigned Managed Identity (Only works when running inside a supported environment, such as Azure VM, Azure App Service, Azure Automation)"},
+        {"managed_identity_client_id": None, "name": "System-assigned Managed Identity (Only works when running inside a supported environment, such as Azure VM, Azure App Service, Azure Automation)"},
         ],
         option_renderer=lambda a: a["name"],
         header="Impersonate this app (or you can type in the client_id of your own app)",
@@ -172,10 +177,14 @@ def main():
             ],
             header="Input authority (Note that MSA-PT apps would NOT use the /common authority)",
             accept_nonempty_string=True,
-            ),
-        allow_broker=_input_boolean("Allow broker? (Azure CLI currently only supports @microsoft.com accounts when enabling broker)"),
         )
-    if isinstance(chosen_app, dict) and "client_secret" in chosen_app:
+    if isinstance(chosen_app, dict) and "client_id" not in chosen_app:
+        app = msal.ManagedIdentity(
+            requests.Session(),
+            client_id=chosen_app.get("managed_identity_client_id"),
+            token_cache=msal.TokenCache(),
+        )
+    elif isinstance(chosen_app, dict) and "client_secret" in chosen_app:
         app = msal.ConfidentialClientApplication(
             chosen_app["client_id"],
             client_credential=chosen_app["client_secret"],
@@ -185,21 +194,35 @@ def main():
         app = msal.PublicClientApplication(
             chosen_app["client_id"] if isinstance(chosen_app, dict) else chosen_app,
             authority=authority,
-            )
+            allow_broker=_input_boolean("Allow broker? (Azure CLI currently only supports @microsoft.com accounts when enabling broker)"),
+        )
     if _input_boolean("Enable MSAL Python's DEBUG log?"):
         logging.basicConfig(level=logging.DEBUG)
-    while True:
-        func = _select_options(list(filter(None, [
-            acquire_token_silent,
+    all_methods = {
+        msal.PublicClientApplication: [
             acquire_token_interactive,
-            acquire_token_by_username_password,
             acquire_ssh_cert_silently,
             acquire_ssh_cert_interactive,
+        ],
+        msal.ConfidentialClientApplication: [acquire_token_for_client],
+        msal.ClientApplication: [
+            acquire_token_silent,
+            acquire_token_by_username_password,
             remove_account,
-            acquire_token_for_client if isinstance(
-                app, msal.ConfidentialClientApplication) else None,
-            exit,
-            ])), option_renderer=lambda f: f.__doc__, header="MSAL Python APIs:")
+        ],
+        msal.ManagedIdentity: [acquire_token_for_managed_identity],
+    }
+    methods_to_be_tested = []
+    for app_type in [
+        msal.PublicClientApplication, msal.ConfidentialClientApplication,
+        msal.ClientApplication, msal.ManagedIdentity,
+    ]:
+        if isinstance(app, app_type):
+            methods_to_be_tested += all_methods[app_type]
+    while True:
+        func = _select_options(
+            methods_to_be_tested + [exit],
+            option_renderer=lambda f: f.__doc__, header="MSAL Python APIs:")
         try:
             func(app)
         except KeyboardInterrupt:  # Useful for bailing out a stuck interactive flow

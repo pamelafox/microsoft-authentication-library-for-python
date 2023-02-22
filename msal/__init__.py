@@ -33,4 +33,5 @@ from .application import (
     )
 from .oauth2cli.oidc import Prompt
 from .token_cache import TokenCache, SerializableTokenCache
+from .imds import ManagedIdentity
 
